@@ -19,14 +19,45 @@ internal class DynamicProxyGlobalFilter(
         val prefix = properties.normalizedPrefix()
         if (path != prefix && !path.startsWith("$prefix/")) return chain.filter(exchange)
 
-        val destination = try {
-            destination(path, exchange.request.uri.rawQuery)
+        val destination: URI
+        val downstreamExchange: ServerWebExchange
+        try {
+            destination = destination(path, exchange.request.uri.rawQuery)
+            downstreamExchange = withDownstreamHeaders(exchange)
         } catch (exception: IllegalArgumentException) {
             return badRequest(exchange, exception.message ?: "Invalid dynamic proxy destination")
         }
 
-        exchange.attributes[GATEWAY_REQUEST_URL_ATTR] = destination
-        return chain.filter(exchange)
+        downstreamExchange.attributes[GATEWAY_REQUEST_URL_ATTR] = destination
+        return chain.filter(downstreamExchange)
+    }
+
+    private fun withDownstreamHeaders(exchange: ServerWebExchange): ServerWebExchange {
+        val mappings = properties.requestHeaderMappings.onEach { mapping ->
+            require(mapping.source.isNotBlank() && mapping.target.isNotBlank()) {
+                "Request header mapping source and target must not be blank"
+            }
+        }
+
+        val request = exchange.request.mutate().headers { headers ->
+            // Capture mapped values first so a source can also appear in removedRequestHeaders.
+            val mappedValues = mappings.map { mapping -> mapping to headers.getValuesAsList(mapping.source).toList() }
+
+            properties.removedRequestHeaders.forEach { header ->
+                require(header.isNotBlank()) { "Removed request header names must not be blank" }
+                headers.remove(header)
+            }
+
+            mappedValues.forEach { (mapping, values) ->
+                headers.remove(mapping.source)
+                if (values.isNotEmpty()) {
+                    headers.remove(mapping.target)
+                    headers.addAll(mapping.target, values)
+                }
+            }
+        }.build()
+
+        return exchange.mutate().request(request).build()
     }
 
     private fun destination(path: String, rawQuery: String?): URI {

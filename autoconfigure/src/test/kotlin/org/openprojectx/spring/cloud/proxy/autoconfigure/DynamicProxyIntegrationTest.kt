@@ -7,6 +7,7 @@ import org.springframework.boot.SpringBootConfiguration
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.testcontainers.containers.GenericContainer
@@ -36,7 +37,12 @@ class DynamicProxyIntegrationTest {
                 "method": "POST",
                 "urlPath": "/target%20host-api/nested",
                 "queryParameters": { "q": { "equalTo": "spring cloud" } },
-                "headers": { "X-Proxy-Test": { "equalTo": "forwarded" } },
+                "headers": {
+                  "X-Proxy-Test": { "equalTo": "forwarded" },
+                  "Authorization": { "equalTo": "Bearer target-credential" },
+                  "Cookie": { "absent": true },
+                  "X-Target-Authorization": { "absent": true }
+                },
                 "bodyPatterns": [{ "equalToJson": { "hello": "gateway" } }]
               },
               "response": {
@@ -66,6 +72,9 @@ class DynamicProxyIntegrationTest {
                     .build()
             }
             .header("X-Proxy-Test", "forwarded")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer proxy-credential")
+            .header(HttpHeaders.COOKIE, "proxy-session=secret")
+            .header("X-Target-Authorization", "Bearer target-credential")
             .contentType(MediaType.APPLICATION_JSON)
             .bodyValue("""{"hello":"gateway"}""")
             .exchange()
